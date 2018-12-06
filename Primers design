@@ -1,0 +1,117 @@
+from Bio.Seq import Seq
+from Bio.Alphabet import IUPAC
+from Bio.Alphabet import Reduced
+import re
+import pandas as pd
+
+
+
+#Enter the bases of your wild type in the cell below removing everything between the "" and replacing with your own
+wt_str = "cacgataa"
+
+#Enter the desired length of the primer and the length of overlap in terms of base pairs
+length_of_primer = 45
+overlap = 15
+
+#Enter the numbering gaps separated by commas. DO NOT DELETE THE BRACKETS
+numbering_gaps = [1, 20, 40]
+
+#Please check the below table if this is the prefered codon for the given WT. If not, edit in place
+prefered_codon = {
+'F':'TTT', 'L':'CTG', 'I':'ATT', 'M':'ATG',
+'V':'GTG', 'S':'TCA', 'P':'CCG', 'T':'ACA',
+'A':'GCG', 'Y':'TAT', 'H':'CAC', 'Q':'CAA', 
+'N':'AAC', 'K':'AAA', 'D':'GAC', 'E':'GAA', 
+'C':'TGT', 'W':'TGG', 'R':'AGA', 'G':'GGA'
+}
+
+
+### Function create_primers 
+## Splits given amino acid sequence into equal sized primers based on user defined length
+## User defined overlap included in the split
+## Returns a list
+def create_primers(amino_acid):
+    if len(amino_acid) <= length_of_primer:
+        return [amino_acid]
+    else:
+        return [amino_acid[:length_of_primer]] + create_primers(amino_acid[length_of_primer - overlap:])
+
+### Function generate_primer_df
+## Creates pandas dataframe 
+## Column1 is index for primary key, col2 is auto incremented prefix based primer name
+## Returns data frame
+def generate_primer_df(primer_list, prefix):
+    primer_df = pd.DataFrame([[str(primer_list.index(each)+1), prefix + "_primer" + str(primer_list.index(each)+1), each] 
+                              for each in primer_list], 
+                             columns=['Index', prefix +'_Primer_name', prefix+'_Primer_seq'])
+    return primer_df
+
+### Function variant_dna
+## Takes the mutations of a variant eg 'Q11E, F13Y', and wt mutations (as a list, gaps indicated as '-')
+## Replaces mutations in the wt 
+## Returns variant amino acid as string incorporating mutation changes
+def variant_dna(var_mut, wt_base_str):
+    var_mut_list = str.split(var_mut, ",")
+    mutations_in_var = [re.split(r'(\d+)', s) for s in var_mut_list]
+    var_base_str = wt_base_str
+    
+    for each in mutations_in_var:
+        org = each[0]
+        pos = each[1]
+        sub = each[2]
+
+        pos_start = (int(pos) - 1) * 3
+        wt_codon_org = wt_base_str[pos_start:pos_start + 3]
+        tmp = Seq(wt_codon_org, IUPAC.unambiguous_dna)
+        wt_aa_org = str(tmp.translate())
+        
+        if(org == wt_aa_org):
+            sub_codon = prefered_codon[sub]
+            var_base_str = var_base_str[:pos_start] + sub_codon.lower() + var_base_str[pos_start+3:]
+        
+            
+    var_base_str = var_base_str.replace('-', '')
+    
+    return var_base_str
+
+### Function compare_primers
+## Takes 3 dataframes - wt_primers, variant primers and new_primers
+## Checks if variant primer is diff from wt primer
+## if yes, checks if it's already recorded as new primer
+## if not, appends to the list of new primers for that index
+## returns back the new primer dataframe
+def compare_primers(wt_primer_df, var_primer_df, new_primer_df):
+    #Iterate over the wt_primer_df
+    for i in range(wt_primer_df.shape[0]):
+        #If wt_primer_seq is diff from variant_primer
+        if wt_primer_df.loc[i][2] != var_primer_df.loc[i][2]: 
+            #Check if that primer has already been recorded
+            if wt_primer_df.loc[i][0] in new_primer_df['Primer_no'].values: 
+                #if its been recorded get the matching index of that record
+                match_index = new_primer_df[new_primer_df['Primer_no'] == wt_primer_df.loc[i][0]].index[0]
+                #Now check if it is there in the list of new primers in that index
+                if var_primer_df.loc[i][2] not in new_primer_df.loc[match_index][2]:
+                    #Append to the list of new primers in that index, since it's not there
+                    new_primer_df.loc[match_index][2].append(var_primer_df.loc[i][2])
+                    new_primer_df.loc[match_index][3].append(var_primer_df.loc[i][1])
+                
+            #If the primer has not been recorded, create a new record for this
+            else:
+                primer_name_seq = var_primer_df.loc[i][1] + " - " + var_primer_df.loc[i][2]
+                new_primer_df.loc[len(new_primer_df)] = [wt_primer_df.loc[i][0], wt_primer_df.loc[i][2],  [var_primer_df.loc[i][2]], [var_primer_df.loc[i][1]], []]
+                
+    return new_primer_df
+    
+    
+    
+    
+wt_primer_list = create_primers(wt_str) ## Creates a list of primers from wild type sequence
+wt_primer_df = generate_primer_df(wt_primer_list, "WT") ## Generates the primer data frame for WT
+wt_primer_df
+
+#Account for numbering gaps in WT
+wt_str_mut = wt_str
+for i in numbering_gaps:
+    index = (i - 1) * 3
+    wt_str_mut = wt_str_mut[:index] + '---' + wt_str_mut[index:]
+
